@@ -9,6 +9,14 @@ this, either).
 
 Yeah, yeah, it's a wrapper around `http.FileServer`.
 
+Installation
+------------
+```sh
+$ go get magisterquis/servedir
+```
+If you don't have go and desperately need a static file server, I'm happy
+to send you compiled binaries.
+
 Examples
 --------
 Serve files from the current directory which holds the TLS cert and key.  In
@@ -59,3 +67,8 @@ Options:
   -nohttps
     	Do not handle HTTPS requests
 ```
+
+Windows
+-------
+It should work on Windows just fine, though you'll have to use the goofy
+Windows backwards slashes.
