@@ -3,11 +3,13 @@ servedir
 
 A very small httpd which serves static files.
 
-This update breaks the previous interface.  On the other hand, I can't imagine
-anybody actually used the previous code (and it's not likely anybody will use
-this, either).
+This update breaks the previous interface (again).  On the other hand, I can't
+imagine anybody actually used the previous code (and it's not likely anybody
+will use this, either).
 
 Yeah, yeah, it's a wrapper around `http.FileServer`.
+
+Also, this documentation needs an update.
 
 Installation
 ------------
@@ -21,6 +23,7 @@ Examples
 --------
 Serve files from the current directory which holds the TLS cert and key.  In
 practice, this is probably a lousy idea.
+
 ```sh
 $ servedir
 2016/03/26 18:19:49 Serving files from .

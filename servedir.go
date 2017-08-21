@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 
 	"github.com/gorilla/handlers"
@@ -24,20 +23,10 @@ import (
 
 func main() {
 	var (
-		no4 = flag.Bool(
-			"4",
-			false,
-			"Don't listen on IPv4",
-		)
-		no6 = flag.Bool(
-			"6",
-			false,
-			"Don't listen on IPv6",
-		)
 		httpAddr = flag.String(
 			"http",
-			"8080",
-			"HTTP [`address` and] port",
+			"0.0.0.0:8080",
+			"HTTP listen `address`",
 		)
 		dir = flag.String(
 			"dir",
@@ -47,27 +36,17 @@ func main() {
 		cert = flag.String(
 			"cert",
 			"cert.pem",
-			"HTTPS `certificate` (ignored if -nohttps is given)",
+			"HTTPS certificate `file`",
 		)
 		key = flag.String(
 			"key",
 			"key.pem",
-			"HTTPS `key` (ignored if -nohttps is given)",
-		)
-		noHTTPS = flag.Bool(
-			"nohttps",
-			false,
-			"Do not handle HTTPS requests",
+			"HTTPS key `file`",
 		)
 		httpsAddr = flag.String(
 			"https",
-			":4433",
-			"HTTPS listen [`address` and] port",
-		)
-		noHTTP = flag.Bool(
-			"nohttp",
-			false,
-			"Don't handle HTTP requests",
+			"0.0.0.0:4433",
+			"HTTPS listen `address`",
 		)
 	)
 	flag.Usage = func() {
@@ -78,6 +57,9 @@ func main() {
 Serves files from the given directory.  Content-type will be automatically
 determined.
 
+If the address given to -http or -https is "", http or https will not be
+served, respectively.
+
 Options:
 `,
 			os.Args[0],
@@ -86,12 +68,9 @@ Options:
 	}
 	flag.Parse()
 
-	/* Make sure we're listening on something */
-	if *noHTTP && *noHTTPS {
-		log.Fatalf("Both -nohttp and -nohttps can't be given")
-	}
-	if *no4 && *no6 {
-		log.Fatalf("Both -no4 and -no6 can't be given")
+	/* Make sure we have at least one address */
+	if "" == *httpAddr && "" == *httpsAddr {
+		log.Fatalf("No listen addresses specified")
 	}
 
 	/* Make sure the served directory is a directory */
@@ -109,20 +88,13 @@ Options:
 		),
 	)
 
-	/* Fix up the addresses */
-	pa := parsePort(*httpAddr)
-	ta := parsePort(*httpsAddr)
-
-	/* WaitGroup to signal end of service */
+	/* Listen and serve */
 	wg := &sync.WaitGroup{}
-
-	wg.Add(4)
-	go serve("tcp4", pa, !(*noHTTP || *no4), wg)
-	go serve("tcp6", pa, !(*noHTTP || *no6), wg)
-	go serveTLS("tcp4", ta, !(*noHTTPS || *no4), *cert, *key, wg)
-	go serveTLS("tcp6", ta, !(*noHTTPS || *no4), *cert, *key, wg)
+	wg.Add(2)
+	go serveHTTP(*httpAddr, wg)
+	go serveHTTPS(*httpsAddr, *cert, *key, wg)
 	wg.Wait()
-	log.Fatalf("Done")
+	log.Printf("Done.")
 }
 
 /* verifyDir returns nil iff dir is a directory. */
@@ -137,88 +109,59 @@ func verifyDir(dir string) error {
 	return nil
 }
 
-/* parseAddress turns a port-only address into a :port address.  If the address
-isn't just a number, p is returned */
-func parsePort(p string) string {
-	if i, err := strconv.Atoi(p); nil == err {
-		return fmt.Sprintf(":%v", i)
-	}
-	return p
-}
-
-/* serve serves up HTTP on proto and addr if ok is true.  It calls wg's Done
-method before returning. */
-func serve(proto, addr string, ok bool, wg *sync.WaitGroup) {
+/* serveHTTP serves files over HTTP */
+func serveHTTP(addr string, wg *sync.WaitGroup) {
 	defer wg.Done()
-	if !ok {
-		return
-	}
-	/* Listen on the address */
-	l, err := net.Listen(proto, addr)
+	/* Listen */
+	l, err := net.Listen("tcp", addr)
 	if nil != err {
-		log.Printf(
-			"Unable to listen on %v (%v): %v",
+		log.Fatalf(
+			"Unable to listen for HTTP requests to %q: %v",
 			addr,
-			proto,
 			err,
 		)
-		return
 	}
-	log.Printf("Listening on %v (%v) for HTTP requests", l.Addr(), proto)
+	log.Printf("Listening for HTTP connections to %v", l.Addr())
 	/* Serve */
-	log.Printf(
-		"Error serving HTTP requests on %v (%v): %v",
-		l.Addr(),
-		proto,
-		http.Serve(l, nil),
-	)
+	if err := http.Serve(l, nil); nil != err {
+		log.Fatalf(
+			"Error serving HTTP requests to %v: %v",
+			l.Addr(),
+			err,
+		)
+	}
 }
 
-/* serveTLS serves up HTTPS requests on proto and addr using cert and key if ok
-is true.  It calls wg's Done method before returning. */
-func serveTLS(
-	proto, addr string,
-	ok bool,
-	cert, key string,
-	wg *sync.WaitGroup,
-) {
+/* serveHTTPS serves files over HTTPS */
+func serveHTTPS(addr, cert, key string, wg *sync.WaitGroup) {
 	defer wg.Done()
-
-	/* Read cert and key */
+	/* Make TLS */
 	c, err := tls.LoadX509KeyPair(cert, key)
 	if nil != err {
-		log.Printf(
-			"Unable to load TLS key from %v and %v for service "+
-				"on %v (%v): %v",
-			cert, key,
-			addr, proto,
+		log.Fatalf(
+			"Unable to load keypair from %q and %q: %v",
+			cert,
+			key,
 			err,
 		)
-		return
 	}
-
-	/* TLS config */
-	conf := &tls.Config{
+	/* Listen */
+	l, err := tls.Listen("tcp", addr, &tls.Config{
 		Certificates: []tls.Certificate{c},
-	}
-
-	/* TLS listener */
-	l, err := tls.Listen(proto, addr, conf)
+	})
 	if nil != err {
-		log.Printf("Unable to listen on %v (%v) for HTTPS "+
-			"requests: %v",
-			addr, proto,
+		log.Fatalf(
+			"Unable to listen for HTTPS connections to %q: %v",
+			addr,
 			err,
 		)
-		return
 	}
-	log.Printf("Listening on %v (%v) for HTTPS requests", l.Addr(), proto)
-
-	/* Serve */
-	log.Printf(
-		"Error serving HTTP requests on %v (%v): %v",
-		l.Addr(),
-		proto,
-		http.Serve(l, nil),
-	)
+	log.Printf("Listening for HTTPS connections to %v", l.Addr())
+	if err := http.Serve(l, nil); nil != err {
+		log.Fatalf(
+			"Error serving HTTPS requests to %v: %v",
+			l.Addr(),
+			err,
+		)
+	}
 }
