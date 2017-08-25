@@ -57,7 +57,7 @@ func main() {
 Serves files from the given directory.  Content-type will be automatically
 determined.
 
-If the address given to -http or -https is "", http or https will not be
+If the address given to -http or -https is no http or https will not be
 served, respectively.
 
 Options:
@@ -90,9 +90,14 @@ Options:
 
 	/* Listen and serve */
 	wg := &sync.WaitGroup{}
-	wg.Add(2)
-	go serveHTTP(*httpAddr, wg)
-	go serveHTTPS(*httpsAddr, *cert, *key, wg)
+	if "no" != *httpAddr {
+		wg.Add(1)
+		go serveHTTP(*httpAddr, wg)
+	}
+	if "no" != *httpsAddr {
+		wg.Add(1)
+		go serveHTTPS(*httpsAddr, *cert, *key, wg)
+	}
 	wg.Wait()
 	log.Printf("Done.")
 }
